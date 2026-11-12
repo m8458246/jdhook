@@ -1,0 +1,7 @@
+# 构建产物
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+/libs/
