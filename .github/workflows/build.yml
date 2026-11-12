@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -29,3 +32,15 @@ jobs:
           name: jdhook-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # 公开仓库的 artifact 下载需要 token，所以额外发一个 release，方便直接 curl
+      - name: Publish release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: latest
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          artifacts: app/build/outputs/apk/debug/*.apk
+          body: "auto build from ${{ github.sha }}"
