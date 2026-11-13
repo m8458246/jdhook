@@ -4,6 +4,9 @@ import android.webkit.ValueCallback;
 import android.webkit.WebView;
 
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -11,6 +14,9 @@ import io.github.libxposed.api.XposedModule;
 final class Hooks {
 
     private static volatile boolean sInstalled;
+    private static int sNetCount;
+    private static final Map<Object, Boolean> SEEN =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     static void install(XposedModule module, ClassLoader cl, String proc) {
         if (sInstalled) {
@@ -89,8 +95,8 @@ final class Hooks {
     }
 
     /**
-     * 原生网络层兜底：H5 走 JSBridge、Taro 小程序走原生时，WebView 里看不到请求，
-     * 但都会经过 HttpSetting。只记录签到/京豆相关的 functionId。
+     * 原生网络层：TTT / Taro 小程序不走 WebView，请求都过 HttpSetting。
+     * 全量记录（按对象去重），用来找出刮豆/签到真正调的是哪个 functionId。
      */
     private static void hookHttpSetting(XposedModule module, ClassLoader cl) throws Exception {
         Class<?> hs = Class.forName("com.jingdong.jdsdk.network.toolbox.HttpSetting", false, cl);
@@ -103,28 +109,22 @@ final class Hooks {
                     Object ret = chain.proceed();
                     try {
                         Object self = chain.getThisObject();
-                        Object fidObj = getFunctionId.invoke(self);
-                        String fid = fidObj == null ? "" : String.valueOf(fidObj);
-                        if (match(fid)) {
+                        if (sNetCount < 1500 && SEEN.put(self, Boolean.TRUE) == null) {
+                            sNetCount++;
+                            Object fidObj = getFunctionId.invoke(self);
                             Object urlObj = getUrl.invoke(self);
+                            String fid = fidObj == null ? "" : String.valueOf(fidObj);
+                            String url = urlObj == null ? "" : String.valueOf(urlObj);
                             String body = ret == null ? "" : String.valueOf(ret);
-                            if (body.length() > 2000) {
-                                body = body.substring(0, 2000);
+                            if (body.length() > 1500) {
+                                body = body.substring(0, 1500);
                             }
-                            Io.write("net.log", "fid=" + fid + " url=" + urlObj + " body=" + body);
+                            Io.write("net.log", "fid=" + fid + " | " + url + " | " + body);
                         }
                     } catch (Throwable ignored) {
                     }
                     return ret;
                 });
-    }
-
-    private static boolean match(String fid) {
-        if (fid == null || fid.isEmpty()) {
-            return false;
-        }
-        String s = fid.toLowerCase();
-        return s.contains("sign") || s.contains("jingdou") || s.contains("bean") || s.contains("qiandao");
     }
 
     private static void onPage(WebView view, String url) {
