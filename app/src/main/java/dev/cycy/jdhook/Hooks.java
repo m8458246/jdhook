@@ -15,6 +15,7 @@ final class Hooks {
 
     private static volatile boolean sInstalled;
     private static int sNetCount;
+    private static int sOkCount;
     private static final Map<Object, Boolean> SEEN =
             Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -43,12 +44,66 @@ final class Hooks {
             Io.log("hook HttpSetting fail: " + t);
         }
         try {
+            hookOkHttp(module, cl);
+            Io.log("hook okhttp ok");
+        } catch (Throwable t) {
+            Io.log("hook okhttp fail: " + t);
+        }
+        try {
             hookAppCreate(module, cl, proc);
             Io.log("hook Application.onCreate ok");
         } catch (Throwable t) {
             Io.log("hook Application.onCreate fail: " + t);
         }
         Io.log("install done proc=" + proc);
+    }
+
+    /**
+     * 最底层兜底：Taro/TTT 页面的请求既不过 WebView 也不过 HttpSetting，
+     * 但只要是 OkHttp 发的，这里都能看到最终 URL、header 和 form body（h5st 通常在这里）。
+     */
+    private static void hookOkHttp(XposedModule module, ClassLoader cl) throws Exception {
+        final Class<?> builderCls = Class.forName("okhttp3.Request$Builder", false, cl);
+        final Class<?> reqCls = Class.forName("okhttp3.Request", false, cl);
+        final Method build = builderCls.getDeclaredMethod("build");
+        final Method url = reqCls.getDeclaredMethod("url");
+        final Method method = reqCls.getDeclaredMethod("method");
+        final Method headers = reqCls.getDeclaredMethod("headers");
+        final Method body = reqCls.getDeclaredMethod("body");
+        module.hook(build)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept(chain -> {
+                    Object r = chain.proceed();
+                    try {
+                        if (sOkCount < 400) {
+                            String us = String.valueOf(url.invoke(r));
+                            if (us.contains("client.action") || us.contains("signBean")) {
+                                sOkCount++;
+                                String bd = "";
+                                try {
+                                    Object o = body.invoke(r);
+                                    bd = o == null ? "" : String.valueOf(o);
+                                } catch (Throwable ignored) {
+                                }
+                                String hd = "";
+                                try {
+                                    hd = String.valueOf(headers.invoke(r));
+                                } catch (Throwable ignored) {
+                                }
+                                if (bd.length() > 1500) {
+                                    bd = bd.substring(0, 1500);
+                                }
+                                if (hd.length() > 1200) {
+                                    hd = hd.substring(0, 1200);
+                                }
+                                Io.write("okhttp.log", "REQ " + method.invoke(r) + " " + us
+                                        + "\nBODY " + bd + "\nHDR " + hd.replace('\n', '|'));
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    return r;
+                });
     }
 
     /** 应用启动后触发一次签到（主进程，延迟 15s 等网络就绪） */
