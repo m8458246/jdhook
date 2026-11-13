@@ -71,10 +71,12 @@ if ! pm list packages 2>/dev/null | grep -q "$PKG"; then
     exit 1
 fi
 
-# 清掉上一轮产物
-rm -f "$DIR/report.json" "$DIR/report2.json" "$DIR/click.json" "$DIR/hook.log"
+# 清掉上一轮产物（hook.log 不清，模块每个进程只写一次，清了就误判）
+rm -f "$DIR/report.json" "$DIR/report2.json" "$DIR/click.json"
 mkdir -p "$DIR"
 chmod 777 "$DIR" 2>/dev/null
+BASE=$(wc -l < "$DIR/hook.log" 2>/dev/null | tr -d ' ')
+[ -n "$BASE" ] || BASE=0
 
 PARAMS="{\"category\":\"jump\",\"des\":\"m\",\"url\":\"${PAGE}\"}"
 DEEPLINK="openapp.jdmobile://virtual?params=$(urlencode "$PARAMS")"
@@ -83,9 +85,10 @@ log "拉起京东并打开签到页..."
 am start -a android.intent.action.VIEW -d "$DEEPLINK" -p "$PKG" >/dev/null 2>&1
 START=$(date +%s)
 
-# 等模块产出（注入在 +6s / +13s，给足余量）
+# 等模块产出（注入在 +6s / +13s）
+# 注意：京东冷启动实测要 100s 以上，这里给 200s
 i=0
-while [ "$i" -lt 40 ]; do
+while [ "$i" -lt 200 ]; do
     if [ -f "$DIR/report2.json" ] || [ -f "$DIR/report.json" ]; then
         sleep 3
         break
@@ -97,8 +100,17 @@ done
 WAITED=$(( $(date +%s) - START ))
 
 if [ ! -f "$DIR/hook.log" ]; then
-    log "[失败] 模块没有任何输出（hook.log 不存在）"
-    notify "京东签到失败" "模块未生效：检查 LSPosed 作用域是否勾选京东并重启"
+    log "[失败] 模块没有任何输出（hook.log 不存在，京东进程没起来或模块没加载）"
+    notify "京东签到失败" "京东进程未启动或模块未加载，详见 jd_signin.log"
+    exit 1
+fi
+
+PAGES=$(tail -n +$((BASE + 1)) "$DIR/hook.log" 2>/dev/null | grep -c " page ")
+log "本轮模块新记录 ${PAGES} 条页面加载"
+
+if [ ! -f "$DIR/report.json" ] && [ ! -f "$DIR/report2.json" ]; then
+    log "[失败] 模块已加载但签到页没有打开（${WAITED}s 内无页面加载）"
+    notify "京东签到失败" "模块已加载，但签到页未打开（新页面 ${PAGES} 条）"
     exit 1
 fi
 
