@@ -42,7 +42,29 @@ final class Hooks {
         } catch (Throwable t) {
             Io.log("hook HttpSetting fail: " + t);
         }
+        try {
+            hookAppCreate(module, cl, proc);
+            Io.log("hook Application.onCreate ok");
+        } catch (Throwable t) {
+            Io.log("hook Application.onCreate fail: " + t);
+        }
         Io.log("install done proc=" + proc);
+    }
+
+    /** 应用启动后触发一次签到（主进程，延迟 15s 等网络就绪） */
+    private static void hookAppCreate(XposedModule module, ClassLoader cl, String proc) throws Exception {
+        Class<?> app = Class.forName("android.app.Application", false, cl);
+        Method m = app.getDeclaredMethod("onCreate");
+        module.hook(m)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept(chain -> {
+                    Object ret = chain.proceed();
+                    try {
+                        SignTask.schedule(cl, proc);
+                    } catch (Throwable ignored) {
+                    }
+                    return ret;
+                });
     }
 
     /** 所有 WebView.loadUrl 都会经过这里：记录 URL，命中签到页就排注入 */
