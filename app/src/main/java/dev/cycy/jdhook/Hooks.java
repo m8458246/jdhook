@@ -30,6 +30,12 @@ final class Hooks {
         } catch (Throwable t) {
             Io.log("hook onPageFinished fail: " + t);
         }
+        try {
+            hookHttpSetting(module, cl);
+            Io.log("hook HttpSetting ok");
+        } catch (Throwable t) {
+            Io.log("hook HttpSetting fail: " + t);
+        }
         Io.log("install done proc=" + proc);
     }
 
@@ -82,24 +88,64 @@ final class Hooks {
                 });
     }
 
+    /**
+     * 原生网络层兜底：H5 走 JSBridge、Taro 小程序走原生时，WebView 里看不到请求，
+     * 但都会经过 HttpSetting。只记录签到/京豆相关的 functionId。
+     */
+    private static void hookHttpSetting(XposedModule module, ClassLoader cl) throws Exception {
+        Class<?> hs = Class.forName("com.jingdong.jdsdk.network.toolbox.HttpSetting", false, cl);
+        final Method getFunctionId = hs.getDeclaredMethod("getFunctionId");
+        final Method getUrl = hs.getDeclaredMethod("getUrl");
+        Method m = hs.getDeclaredMethod("getJsonParamsString");
+        module.hook(m)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept(chain -> {
+                    Object ret = chain.proceed();
+                    try {
+                        Object self = chain.getThisObject();
+                        Object fidObj = getFunctionId.invoke(self);
+                        String fid = fidObj == null ? "" : String.valueOf(fidObj);
+                        if (match(fid)) {
+                            Object urlObj = getUrl.invoke(self);
+                            String body = ret == null ? "" : String.valueOf(ret);
+                            if (body.length() > 2000) {
+                                body = body.substring(0, 2000);
+                            }
+                            Io.write("net.log", "fid=" + fid + " url=" + urlObj + " body=" + body);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    return ret;
+                });
+    }
+
+    private static boolean match(String fid) {
+        if (fid == null || fid.isEmpty()) {
+            return false;
+        }
+        String s = fid.toLowerCase();
+        return s.contains("sign") || s.contains("jingdou") || s.contains("bean") || s.contains("qiandao");
+    }
+
     private static void onPage(WebView view, String url) {
         if (url == null) {
             return;
         }
         Io.log("page " + url);
-        boolean sign = url.contains("pro.m.jd.com/mall/active")
+        boolean target = url.contains("pro.m.jd.com/mall/active")
                 || url.contains("bean.m.jd.com")
                 || url.contains("jdhook=");
-        if (!sign) {
+        if (!target) {
             return;
         }
         boolean click = url.contains("jdhook=click");
         try {
-            view.postDelayed(() -> eval(view, Inject.ARM_JS, null), 2500L);
-            view.postDelayed(() -> eval(view, Inject.DUMP_JS, "report.json"), 6000L);
+            view.postDelayed(() -> eval(view, Inject.ARM_JS, null), 3000L);
+            view.postDelayed(() -> eval(view, Inject.DUMP_JS, "report.json"), 8000L);
             if (click) {
-                view.postDelayed(() -> eval(view, Inject.CLICK_JS, "click.json"), 9000L);
-                view.postDelayed(() -> eval(view, Inject.DUMP_JS, "report2.json"), 13000L);
+                view.postDelayed(() -> eval(view, Inject.DUMP_JS, "report2.json"), 16000L);
+                view.postDelayed(() -> eval(view, Inject.CLICK_JS, "click.json"), 20000L);
+                view.postDelayed(() -> eval(view, Inject.DUMP_JS, "report3.json"), 26000L);
             }
         } catch (Throwable t) {
             Io.log("schedule fail: " + t);
