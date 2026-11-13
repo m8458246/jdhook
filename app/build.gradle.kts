@@ -10,8 +10,8 @@ android {
         applicationId = "dev.cycy.jdhook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.5.1"
     }
 
     // 固定签名：CI 每次用同一把 key，装更新时 pm install -r 不会因签名变化失败，

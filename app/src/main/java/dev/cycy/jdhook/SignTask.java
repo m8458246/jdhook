@@ -179,7 +179,8 @@ final class SignTask {
         }
         Io.write("result.json", "{\"ok\":" + (code == 200) + ",\"http\":" + code + ",\"raw\":" + quote(raw) + "}");
         Io.log("sign: onEnd " + raw);
-        if (raw.contains("\"code\":\"0\"") || raw.contains("\"code\":0")) {
+        // 只有真正成功才记今天：JD 的业务失败也是 code=0，靠 errorCode 区分
+        if (!raw.contains("errorCode") && (raw.contains("\"code\":\"0\"") || raw.contains("\"code\":0"))) {
             markToday();
         }
     }
